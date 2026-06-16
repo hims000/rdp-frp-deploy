@@ -15,7 +15,6 @@ import ctypes
 import time
 import argparse
 import socket
-import tempfile
 import re
 from datetime import datetime
 
@@ -43,7 +42,6 @@ NSSM_EXE = os.path.join(FRPC_DIR, "nssm.exe")
 def get_resource_path(relative_path):
     """获取内嵌资源路径（兼容 PyInstaller 打包环境）"""
     if getattr(sys, '_MEIPASS', False):
-        # PyInstaller 临时解压目录
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.join(BASE_DIR, relative_path)
 
@@ -52,19 +50,17 @@ def extract_embedded_assets():
     log("提取内嵌组件...")
     os.makedirs(FRPC_DIR, exist_ok=True)
 
-    # 提取 frpc.exe
     frpc_src = get_resource_path("assets/frpc.exe")
     if os.path.exists(frpc_src):
         shutil.copy2(frpc_src, FRPC_EXE)
-        log(f"frpc.exe 已提取: {FRPC_EXE}")
+        log("frpc.exe 已提取: {}".format(FRPC_EXE))
     else:
         log("警告: 内嵌 frpc.exe 不存在", "WARN")
 
-    # 提取 nssm.exe
     nssm_src = get_resource_path("assets/nssm.exe")
     if os.path.exists(nssm_src):
         shutil.copy2(nssm_src, NSSM_EXE)
-        log(f"nssm.exe 已提取: {NSSM_EXE}")
+        log("nssm.exe 已提取: {}".format(NSSM_EXE))
     else:
         log("警告: 内嵌 nssm.exe 不存在", "WARN")
 
@@ -74,14 +70,13 @@ def extract_embedded_assets():
 
 def log(msg, level="INFO"):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{ts}] [{level}] {msg}"
+    line = "[{}] [{}] {}".format(ts, level, msg)
     try:
         os.makedirs(FRPC_DIR, exist_ok=True)
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except:
         pass
-    # 调试模式输出到控制台（如果有）
     if not getattr(sys, 'frozen', False):
         print(line)
 
@@ -110,16 +105,16 @@ def run_cmd(cmd, check=True, timeout=60, shell=False):
         result = subprocess.run(cmd, **kwargs)
         if check and result.returncode != 0:
             stderr = result.stderr.strip() if result.stderr else ""
-            log(f"命令失败: {cmd_str} | {stderr}", "ERROR")
+            log("命令失败: {} | {}".format(cmd_str, stderr), "ERROR")
             raise subprocess.CalledProcessError(result.returncode, cmd)
         return result
     except subprocess.TimeoutExpired:
-        log(f"命令超时: {cmd_str}", "ERROR")
+        log("命令超时: {}".format(cmd_str), "ERROR")
         if check:
             raise
         return None
     except Exception as e:
-        log(f"执行异常: {cmd_str} | {e}", "ERROR")
+        log("执行异常: {} | {}".format(cmd_str, e), "ERROR")
         if check:
             raise
         return None
@@ -191,9 +186,9 @@ def add_rdp_user(username=None):
         return
     res = run_cmd(["net", "localgroup", "Remote Desktop Users", target, "/add"], check=False)
     if res and res.returncode == 0:
-        log(f"用户 [{target}] 已加入远程桌面用户组。")
+        log("用户 [{}] 已加入远程桌面用户组。".format(target))
     else:
-        log(f"用户 [{target}] 可能已在组中，或添加失败（非致命）。", "WARN")
+        log("用户 [{}] 可能已在组中，或添加失败（非致命）。".format(target), "WARN")
 
 # ==================== 电源与网卡节能控制 ====================
 
@@ -209,10 +204,11 @@ def set_power_plan():
             old_guid = match.group(1)
             backup_file = os.path.join(BACKUP_DIR, "power_plan.txt")
             try:
-                with open(backup_file, "w", encoding="utf-8") as f:
-n                    f.write(old_guid)
+                f = open(backup_file, "w", encoding="utf-8")
+                f.write(old_guid)
+                f.close()
             except Exception as e:
-                log(f"备份电源方案失败: {e}", "WARN")
+                log("备份电源方案失败: {}".format(e), "WARN")
 
     res = run_cmd(["powercfg", "/list"], check=False)
     high_perf_guid = None
@@ -226,7 +222,7 @@ n                    f.write(old_guid)
 
     if high_perf_guid:
         run_cmd(["powercfg", "-setactive", high_perf_guid], check=False)
-        log(f"已激活高性能电源方案 {high_perf_guid}")
+        log("已激活高性能电源方案 {}".format(high_perf_guid))
     else:
         log("未找到高性能方案，使用当前电源方案并将所有超时设为 0。", "WARN")
 
@@ -257,7 +253,7 @@ def disable_nic_powersaving():
                 if dev_clean:
                     run_cmd(["powercfg", "/devicedisablewake", dev_clean], check=False)
     except Exception as e:
-        log(f"清除设备唤醒权限时出错: {e}", "WARN")
+        log("清除设备唤醒权限时出错: {}".format(e), "WARN")
 
     log("网卡节能禁用流程执行完毕。")
 
@@ -282,10 +278,10 @@ def deploy_frp_config(cfg):
     remote_port = cfg['remote_port']
 
     toml_lines = [
-        f'serverAddr = "{server_addr}"',
-        f'serverPort = {server_port}',
+        'serverAddr = "{}"'.format(server_addr),
+        'serverPort = {}'.format(server_port),
         'auth.method = "token"',
-        f'auth.token = "{token}"',
+        'auth.token = "{}"'.format(token),
         '',
         'transport.poolCount = 8',
         'transport.tcpMux = true',
@@ -298,7 +294,7 @@ def deploy_frp_config(cfg):
         'type = "tcp"',
         'localIP = "127.0.0.1"',
         'localPort = 3389',
-        f'remotePort = {remote_port}',
+        'remotePort = {}'.format(remote_port),
         ''
     ]
 
@@ -317,7 +313,7 @@ def test_frp_server(addr, port, timeout=5):
         sock.close()
         return True
     except Exception as e:
-        log(f"frp 服务器连通性测试失败: {e}", "WARN")
+        log("frp 服务器连通性测试失败: {}".format(e), "WARN")
         return False
 
 # ==================== 系统服务注册 ====================
@@ -350,7 +346,7 @@ def register_frp_service():
 
     run_cmd([NSSM_EXE, "install", SERVICE_NAME, FRPC_EXE])
     run_cmd([NSSM_EXE, "set", SERVICE_NAME, "AppDirectory", FRPC_DIR])
-    run_cmd([NSSM_EXE, "set", SERVICE_NAME, "AppParameters", f'-c "{FRPC_CONFIG}"'])
+    run_cmd([NSSM_EXE, "set", SERVICE_NAME, "AppParameters", '-c "{}"'.format(FRPC_CONFIG)])
     run_cmd([NSSM_EXE, "set", SERVICE_NAME, "DisplayName", APP_NAME])
     run_cmd([NSSM_EXE, "set", SERVICE_NAME, "Description", "frpc remote desktop tunnel service (auto-deployed)"])
 
@@ -414,13 +410,14 @@ def uninstall_all():
     pb_file = os.path.join(BACKUP_DIR, "power_plan.txt")
     if os.path.exists(pb_file):
         try:
-            with open(pb_file, "r", encoding="utf-8") as f:
-                old_guid = f.read().strip()
+            f = open(pb_file, "r", encoding="utf-8")
+            old_guid = f.read().strip()
+            f.close()
             if old_guid:
                 run_cmd(["powercfg", "-setactive", old_guid], check=False)
-                log(f"已恢复原始电源方案 {old_guid}")
+                log("已恢复原始电源方案 {}".format(old_guid))
         except Exception as e:
-            log(f"恢复电源方案失败: {e}", "WARN")
+            log("恢复电源方案失败: {}".format(e), "WARN")
 
     enable_nic_powersaving()
 
@@ -432,11 +429,11 @@ def uninstall_all():
                     break
                 time.sleep(1)
             except Exception as e:
-                log(f"删除目录重试中: {e}", "WARN")
+                log("删除目录重试中: {}".format(e), "WARN")
         if os.path.exists(FRPC_DIR):
-            log(f"无法完全删除 {FRPC_DIR}，请手动清理。", "WARN")
+            log("无法完全删除 {}，请手动清理。".format(FRPC_DIR), "WARN")
         else:
-            log(f"已删除目录 {FRPC_DIR}")
+            log("已删除目录 {}".format(FRPC_DIR))
 
     log("卸载完成。")
 
@@ -452,7 +449,7 @@ def create_config_template():
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(sample, f, indent=4, ensure_ascii=False)
-    log(f"未找到配置文件，已生成模板: {CONFIG_FILE}", "WARN")
+    log("未找到配置文件，已生成模板: {}".format(CONFIG_FILE), "WARN")
 
 def load_config(args):
     """优先从命令行参数获取配置，否则从 config.json 读取"""
@@ -472,7 +469,7 @@ def load_config(args):
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg = json.load(f)
     except Exception as e:
-        log(f"读取配置文件失败: {e}", "ERROR")
+        log("读取配置文件失败: {}".format(e), "ERROR")
         create_config_template()
         sys.exit(1)
 
@@ -507,7 +504,6 @@ def main():
 
     log("=== RDP + frp 远程桌面穿透部署开始（离线版）===")
 
-    # 提取内嵌组件
     if not extract_embedded_assets():
         log("核心组件提取失败，请检查程序完整性。", "ERROR")
         sys.exit(1)
@@ -525,9 +521,9 @@ def main():
     deploy_frp_config(cfg)
     register_frp_service()
 
-    log(f"部署完成。远程桌面端口 {cfg['remote_port']} 已映射到本机 3389 端口。")
+    log("部署完成。远程桌面端口 {} 已映射到本机 3389 端口。".format(cfg['remote_port']))
     log("系统将在重启后保持远程桌面与穿透服务持续在线。")
-    log(f"日志文件: {LOG_FILE}")
+    log("日志文件: {}".format(LOG_FILE))
 
 if __name__ == "__main__":
     main()
