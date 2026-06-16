@@ -4,18 +4,12 @@ on:
   push:
     branches: [main, master]
     tags: ['v*']
-  pull_request:
-    branches: [main, master]
   workflow_dispatch:
     inputs:
       frp_version:
         description: 'frp version'
         required: true
         default: '0.69.0'
-      nssm_url:
-        description: 'NSSM download URL'
-        required: true
-        default: 'http://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip'
 
 jobs:
   build-windows:
@@ -50,31 +44,27 @@ jobs:
           Copy-Item -Path $frpcPath.FullName -Destination assets/frpc.exe -Force
           Write-Host "frpc.exe copied to assets/"
 
-      - name: Download NSSM
+      - name: Prepare NSSM
         run: |
-          $nssmUrl = "${{ github.event.inputs.nssm_url || 'http://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip' }}"
-          Write-Host "Downloading NSSM from $nssmUrl"
-          Invoke-WebRequest -Uri $nssmUrl -OutFile nssm.zip -TimeoutSec 120
-          Expand-Archive -Path nssm.zip -DestinationPath nssm_extracted -Force
-          $nssmPath = Get-ChildItem -Path nssm_extracted -Recurse -Filter "nssm.exe" | Select-Object -First 1
-          if (-not $nssmPath) {
-            Write-Error "nssm.exe not found in downloaded archive"
-            exit 1
+          if (Test-Path "assets/nssm.exe") {
+            Write-Host "Using local nssm.exe"
+          } else {
+            $nssmUrl = "https://github.com/nicoverbruggen/nssm/releases/download/2.24/nssm-2.24.zip"
+            Write-Host "Downloading NSSM from $nssmUrl"
+            Invoke-WebRequest -Uri $nssmUrl -OutFile nssm.zip -TimeoutSec 120
+            Expand-Archive -Path nssm.zip -DestinationPath nssm_extracted -Force
+            $nssmPath = Get-ChildItem -Path nssm_extracted -Recurse -Filter "nssm.exe" | Select-Object -First 1
+            if (-not $nssmPath) {
+              Write-Error "nssm.exe not found in downloaded archive"
+              exit 1
+            }
+            Copy-Item -Path $nssmPath.FullName -Destination assets/nssm.exe -Force
+            Write-Host "nssm.exe copied to assets/"
           }
-          Copy-Item -Path $nssmPath.FullName -Destination assets/nssm.exe -Force
-          Write-Host "nssm.exe copied to assets/"
 
       - name: Build single-file EXE
         run: |
-          pyinstaller `
-            --onefile `
-            --noconsole `
-            --name "rdp_frp_deploy" `
-            --add-data "assets/frpc.exe;assets" `
-            --add-data "assets/nssm.exe;assets" `
-            --icon NONE `
-            rdp_frp_deploy.py
-        shell: pwsh
+          pyinstaller --onefile --noconsole --name "rdp_frp_deploy" --add-data "assets/frpc.exe;assets" --add-data "assets/nssm.exe;assets" rdp_frp_deploy.py
 
       - name: Verify build
         run: |
