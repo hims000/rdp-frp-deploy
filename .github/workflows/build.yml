@@ -1,0 +1,103 @@
+name: Build RDP+frp Deploy Tool
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      frp_version:
+        description: 'frp version'
+        required: true
+        default: '0.69.0'
+      nssm_url:
+        description: 'NSSM download URL'
+        required: true
+        default: 'http://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Download frp
+        run: |
+          $frpVersion = "${{ github.event.inputs.frp_version || '0.69.0' }}"
+          $url = "https://github.com/fatedier/frp/releases/download/v$frpVersion/frp_$($frpVersion)_windows_amd64.zip"
+          Write-Host "Downloading frp from $url"
+          Invoke-WebRequest -Uri $url -OutFile frp.zip -TimeoutSec 120
+          Expand-Archive -Path frp.zip -DestinationPath frp_extracted -Force
+          $frpcPath = Get-ChildItem -Path frp_extracted -Recurse -Filter "frpc.exe" | Select-Object -First 1
+          if (-not $frpcPath) {
+            Write-Error "frpc.exe not found in downloaded archive"
+            exit 1
+          }
+          New-Item -ItemType Directory -Path assets -Force
+          Copy-Item -Path $frpcPath.FullName -Destination assets/frpc.exe -Force
+          Write-Host "frpc.exe copied to assets/"
+
+      - name: Download NSSM
+        run: |
+          $nssmUrl = "${{ github.event.inputs.nssm_url || 'http://nssm.cc/ci/nssm-2.24-101-g897c7ad.zip' }}"
+          Write-Host "Downloading NSSM from $nssmUrl"
+          Invoke-WebRequest -Uri $nssmUrl -OutFile nssm.zip -TimeoutSec 120
+          Expand-Archive -Path nssm.zip -DestinationPath nssm_extracted -Force
+          $nssmPath = Get-ChildItem -Path nssm_extracted -Recurse -Filter "nssm.exe" | Select-Object -First 1
+          if (-not $nssmPath) {
+            Write-Error "nssm.exe not found in downloaded archive"
+            exit 1
+          }
+          Copy-Item -Path $nssmPath.FullName -Destination assets/nssm.exe -Force
+          Write-Host "nssm.exe copied to assets/"
+
+      - name: Build single-file EXE
+        run: |
+          pyinstaller `
+            --onefile `
+            --noconsole `
+            --name "rdp_frp_deploy" `
+            --add-data "assets/frpc.exe;assets" `
+            --add-data "assets/nssm.exe;assets" `
+            --icon NONE `
+            rdp_frp_deploy.py
+        shell: pwsh
+
+      - name: Verify build
+        run: |
+          $exePath = "dist/rdp_frp_deploy.exe"
+          if (Test-Path $exePath) {
+            $size = (Get-Item $exePath).Length / 1MB
+            Write-Host "Build successful: $exePath ($([math]::Round($size, 2)) MB)"
+          } else {
+            Write-Error "EXE not found!"
+            exit 1
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdp_frp_deploy_windows
+          path: dist/rdp_frp_deploy.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/rdp_frp_deploy.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
